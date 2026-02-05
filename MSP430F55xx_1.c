@@ -4,6 +4,10 @@
 #include <stdarg.h>
 #include "board_define.h"
 
+// --- 설정 상수 ---
+#define PWM_PERIOD  1000        // 1kHz Frequency
+#define PWM_DUTY    100         // 10% Duty (Safety First!)
+
 // --- 함수 선언 ---
 void BSP_Init(void);
 void SPI_Init(void);
@@ -14,62 +18,120 @@ void UART_PrintHex16(uint16_t value);
 uint16_t DRV_ReadReg(uint8_t addr);
 void DRV_WriteReg(uint8_t addr, uint16_t data);
 void DRV_Init_Registers(void);
-void PWM_Init(void);
+
+void Timer_Init(void);
+void Commutate_Step(uint8_t step);
+void Check_Faults(void);
 
 // --- 메인 함수 ---
 int main(void) {
-    BSP_Init();     // 하드웨어 초기화
-    SPI_Init();     // SPI 초기화 (CPHA 수정됨)
-    UART_Init();    // UART 초기화
+    BSP_Init();     
+    SPI_Init();     
+    UART_Init();    
+    Timer_Init();   // 타이머 초기화 (PWM 준비)
 
-    UART_Printf("\r\n=== Step 3: PWM Signal Verify ===\r\n");
+    __delay_cycles(1000000); 
+    UART_Printf("\r\n=== Step 5: First Spin (Open Loop) ===\r\n");
 
-    // [안전 장치] DRV8305 비활성화! (모터 구동 방지)
-    // EN_GATE를 Low로 두면 DRV8305는 PWM 입력을 무시합니다.
-    DRV_EN_PORT &= ~DRV_EN_PIN; 
-    UART_Printf("Safety: DRV8305 Disabled (EN_GATE = LOW)\r\n");
-
-    // PWM 발생 시작
-    PWM_Init();
-    UART_Printf("PWM Generator: ON (1kHz, 50% Duty)\r\n");
-    UART_Printf("Action: Please probe MCU pins with Oscilloscope.\r\n");
-
-    // __delay_cycles(1000000); // 전원 안정화 대기
-    // UART_Printf("\r\n=== System Booting... ===\r\n");
-
-    // // 1. DRV8305 깨우기 (WAKE)
-    // DRV_WAKE_PORT |= DRV_WAKE_PIN;
-    // __delay_cycles(100000); 
+    // 1. DRV8305 Wake Up
+    DRV_WAKE_PORT |= DRV_WAKE_PIN;
+    __delay_cycles(100000);
     
-    // // 2. EN_GATE 활성화 (설정을 위해 Enable 필요)
-    // DRV_EN_PORT |= DRV_EN_PIN;
-    // __delay_cycles(10000); 
+    // 2. Register Config (Safety)
+    DRV_Init_Registers();
 
-    // UART_Printf("[DRV8305] Waking up & Enable...\r\n");
+    // 3. EN_GATE Enable (이제 모터에 전기가 들어갑니다!)
+    DRV_EN_PORT |= DRV_EN_PIN;
+    // DRV_EN_PORT &= ~DRV_EN_PIN;
+    UART_Printf("WARNING: Motor Driver ENABLED! (Duty 10%%)\r\n");
+    __delay_cycles(10000);
 
-    // // 3. [핵심] 레지스터 설정 및 검증
-    // DRV_Init_Registers();
-
-    // UART_Printf("[System] Ready. Monitoring Status...\r\n");
-
-    // 4. 상태 모니터링
+    // 4. 6-Step Commutation Loop
+    uint8_t step = 0;
     while (1) {
-        // uint16_t status = DRV_ReadReg(0x01); // Status
-        // uint16_t vds = DRV_ReadReg(0x02);    // VDS Faults
+        Check_Faults();
+        Commutate_Step(step); // 스텝 변경
         
-        // UART_Printf("Stat(0x01): "); UART_PrintHex16(status);
-        // UART_Printf(" | VDS(0x02): "); UART_PrintHex16(vds);
-        // UART_Printf("\r\n");
+        UART_Printf("Step: %d\r\n", step);
         
-        // P1OUT ^= BIT0; // LED 깜빡임
-        // __delay_cycles(8000000); // 1초 대기
+        step++;
+        if (step > 5) step = 0;
+
+        P1OUT ^= BIT0; // LED Toggle
         
-        // LED만 깜빡이며 살아있음을 표시
-        P1OUT ^= BIT0;
-        __delay_cycles(500000);
+        // 속도 조절: 0.5초마다 한 칸씩 이동 (눈으로 확인 가능)
+        __delay_cycles(500000); 
     }
 }
 
+// --- 6-Step Commutation 함수 ---
+// 각 스텝마다 전류가 흐르는 길을 열어줍니다.
+// High Side는 PWM(10%), Low Side는 ON(100%) 상태로 구동합니다.
+void Commutate_Step(uint8_t step) {
+    // 일단 모든 출력 끄기 (Reset) - 안전을 위해
+    // 출력 모드 0 (OUT bit control), 출력 0
+    TA2CCTL1 = OUTMOD_0; TA2CCTL1 &= ~OUT; // A_L
+    TA2CCTL2 = OUTMOD_0; TA2CCTL2 &= ~OUT; // A_H
+    TA0CCTL3 = OUTMOD_0; TA0CCTL3 &= ~OUT; // B_L
+    TA0CCTL4 = OUTMOD_0; TA0CCTL4 &= ~OUT; // B_H
+    TB0CCTL5 = OUTMOD_0; TB0CCTL5 &= ~OUT; // C_L
+    TB0CCTL2 = OUTMOD_0; TB0CCTL2 &= ~OUT; // C_H
+
+    switch (step) {
+        case 0: // Step 1: A+ B- (A High PWM, B Low ON)
+            TA2CCR2 = PWM_DUTY; TA2CCTL2 = OUTMOD_7; // A_H PWM
+            TA0CCTL3 = OUTMOD_0; TA0CCTL3 |= OUT;    // B_L ON
+            break;
+            
+        case 1: // Step 2: A+ C-
+            TA2CCR2 = PWM_DUTY; TA2CCTL2 = OUTMOD_7; // A_H PWM
+            TB0CCTL5 = OUTMOD_0; TB0CCTL5 |= OUT;    // C_L ON
+            break;
+            
+        case 2: // Step 3: B+ C-
+            TA0CCR4 = PWM_DUTY; TA0CCTL4 = OUTMOD_7; // B_H PWM
+            TB0CCTL5 = OUTMOD_0; TB0CCTL5 |= OUT;    // C_L ON
+            break;
+            
+        case 3: // Step 4: B+ A-
+            TA0CCR4 = PWM_DUTY; TA0CCTL4 = OUTMOD_7; // B_H PWM
+            TA2CCTL1 = OUTMOD_0; TA2CCTL1 |= OUT;    // A_L ON
+            break;
+            
+        case 4: // Step 5: C+ A-
+            TB0CCR2 = PWM_DUTY; TB0CCTL2 = OUTMOD_7; // C_H PWM
+            TA2CCTL1 = OUTMOD_0; TA2CCTL1 |= OUT;    // A_L ON
+            break;
+            
+        case 5: // Step 6: C+ B-
+            TB0CCR2 = PWM_DUTY; TB0CCTL2 = OUTMOD_7; // C_H PWM
+            TA0CCTL3 = OUTMOD_0; TA0CCTL3 |= OUT;    // B_L ON
+            break;
+    }
+}
+
+// --- 타이머 초기화 (기본 설정만) ---
+void Timer_Init(void) {
+    // 핀 설정 (Peripheral 모드)
+    P2DIR |= (BIT4 | BIT5); P2SEL |= (BIT4 | BIT5); // A
+    P1DIR |= (BIT4 | BIT5); P1SEL |= (BIT4 | BIT5); // B
+    P7DIR |= BIT4; P7SEL |= BIT4; // C_H
+    P3DIR |= BIT5; P3SEL |= BIT5; // C_L
+
+    // Timer A2 (Phase A)
+    TA2CCR0 = PWM_PERIOD - 1;
+    TA2CTL = TASSEL_2 + MC_1 + TACLR; // SMCLK, Up Mode
+
+    // Timer A0 (Phase B)
+    TA0CCR0 = PWM_PERIOD - 1;
+    TA0CTL = TASSEL_2 + MC_1 + TACLR;
+
+    // Timer B0 (Phase C)
+    TB0CCR0 = PWM_PERIOD - 1;
+    TB0CTL = TBSSEL_2 + MC_1 + TBCLR;
+}
+
+//============================================================================
 // --- 레지스터 초기화 함수 ---
 void DRV_Init_Registers(void) {
     UART_Printf(">>> Configuring Registers...\r\n");
@@ -316,4 +378,59 @@ void PWM_Init(void) {
     TB0CCTL5 = OUTMOD_7;            // TB0.5 -> P3.5 (Low)
     TB0CCR5 = pwm_period / 2;
     TB0CTL = TBSSEL_2 + MC_1 + TBCLR;
+}
+
+// --- 실시간 에러 감지 및 리포팅 함수 ---
+void Check_Faults(void) {
+    // nFAULT 핀이 Low(0)로 떨어졌는지 확인 (Active Low)
+    if ((DRV_FAULT_PORT & DRV_FAULT_PIN) == 0) {
+        
+        // 1. 즉시 모터 정지 (안전 제일!)
+        DRV_EN_PORT &= ~DRV_EN_PIN; // Enable 끄기
+        TA2CCTL1 = 0; TA2CCTL2 = 0; // PWM 타이머 모두 정지
+        TA0CCTL3 = 0; TA0CCTL4 = 0;
+        TB0CCTL2 = 0; TB0CCTL5 = 0;
+        
+        UART_Printf("\r\n[EMERGENCY] Fault Detected! Motor Stopped.\r\n");
+
+        // 2. 에러 레지스터 읽기 (0x01: Warning, 0x02: VDS, 0x03: IC)
+        uint16_t stat_reg01 = DRV_ReadReg(0x01);
+        uint16_t vds_reg02  = DRV_ReadReg(0x02);
+        uint16_t ic_reg03   = DRV_ReadReg(0x03);
+
+        // 3. Status Reg 0x01 분석
+        UART_Printf(">> 0x01 (Status): "); UART_PrintHex16(stat_reg01); UART_Printf("\r\n");
+        if (stat_reg01 & 0x0400) UART_Printf("   - FAULT Pin Asserted\r\n");
+        if (stat_reg01 & 0x0100) UART_Printf("   - VDS (Overcurrent) Detected\r\n");
+        if (stat_reg01 & 0x0080) UART_Printf("   - UVLO (Undervoltage)\r\n");
+        if (stat_reg01 & 0x0040) UART_Printf("   - Overtemperature\r\n");
+
+        // 4. VDS Reg 0x02 분석 (어느 MOSFET이 터졌나?)
+        if (vds_reg02 != 0) {
+            UART_Printf(">> 0x02 (VDS Faults): "); UART_PrintHex16(vds_reg02); UART_Printf("\r\n");
+            // High Side Checks
+            if (vds_reg02 & 0x0001) UART_Printf("   - High Side A (Overcurrent)\r\n");
+            if (vds_reg02 & 0x0002) UART_Printf("   - Low Side A (Overcurrent)\r\n");
+            if (vds_reg02 & 0x0004) UART_Printf("   - High Side B (Overcurrent)\r\n");
+            // Low Side Checks
+            if (vds_reg02 & 0x0008) UART_Printf("   - Low Side B (Overcurrent)\r\n");
+            if (vds_reg02 & 0x0010) UART_Printf("   - High Side C (Overcurrent)\r\n");
+            if (vds_reg02 & 0x0020) UART_Printf("   - Low Side C (Overcurrent)\r\n");
+        }
+
+        // 5. IC Faults 0x03 분석
+        if (ic_reg03 != 0) {
+            UART_Printf(">> 0x03 (IC Faults): "); UART_PrintHex16(ic_reg03); UART_Printf("\r\n");
+            if (ic_reg03 & 0x0400) UART_Printf("   - PVDD Undervoltage\r\n");
+            if (ic_reg03 & 0x0080) UART_Printf("   - VCP Charge Pump Fail\r\n");
+        }
+
+        UART_Printf("Action: Check wiring & Reset Board.\r\n");
+        
+        // 6. 무한 루프 (재부팅 전까지 동작 중지)
+        while(1) {
+            P1OUT ^= BIT0; // LED 빠르게 깜빡임 (에러 표시)
+            __delay_cycles(200000);
+        }
+    }
 }
