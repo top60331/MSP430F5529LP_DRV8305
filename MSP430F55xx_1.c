@@ -5,63 +5,195 @@
 #include "board_define.h"
 
 // --- 설정 상수 ---
-#define PWM_PERIOD  1000        // 1kHz Frequency
-#define PWM_DUTY    100         // 10% Duty (Safety First!)
+// 24MHz 클럭 기준
+// PWM 주파수 20kHz = 24,000,000 / 20,000 = 1200 ticks
+#define PWM_PERIOD      1200        
+#define PWM_DUTY_INIT   180         // [수정 1] 초기 토크 상향 (10% -> 15%) 1200 * 0.15 = 180
 
 // --- 함수 선언 ---
+void SystemClock_Init(void); // [신규] 24MHz 클럭 설정
 void BSP_Init(void);
 void SPI_Init(void);
 void UART_Init(void);
 void UART_Printf(char *format, ...);
 void UART_PrintHex16(uint16_t value);
-
 uint16_t DRV_ReadReg(uint8_t addr);
 void DRV_WriteReg(uint8_t addr, uint16_t data);
 void DRV_Init_Registers(void);
-
 void Timer_Init(void);
 void Commutate_Step(uint8_t step);
 void Check_Faults(void);
+void SetVCoreUp(uint8_t level);
 
 // --- 메인 함수 ---
 int main(void) {
+    WDTCTL = WDTPW | WDTHOLD;   // Watchdog Stop
+
+    SystemClock_Init(); // 1. CPU 속도를 24MHz로 높임 (필수!)
     BSP_Init();     
     SPI_Init();     
     UART_Init();    
-    Timer_Init();   // 타이머 초기화 (PWM 준비)
+    Timer_Init();       // PWM 20kHz 설정
 
-    __delay_cycles(1000000); 
-    UART_Printf("\r\n=== Step 5: First Spin (Open Loop) ===\r\n");
+    __delay_cycles(24000000); // 1초 대기 (클럭이 빨라져서 숫자도 커짐)
+    UART_Printf("\r\n=== Step 6: Silent & Smooth Run ===\r\n");
+    UART_Printf("System Clock: 24MHz, PWM: 20kHz\r\n");
 
-    // 1. DRV8305 Wake Up
+    // 1. DRV8305 Wake Up & Config
     DRV_WAKE_PORT |= DRV_WAKE_PIN;
-    __delay_cycles(100000);
+    __delay_cycles(240000); // 10ms
     
-    // 2. Register Config (Safety)
-    DRV_Init_Registers();
+    DRV_Init_Registers(); // 레지스터 설정 (전류 등)
 
-    // 3. EN_GATE Enable (이제 모터에 전기가 들어갑니다!)
+    // 2. Enable Motor Driver
     DRV_EN_PORT |= DRV_EN_PIN;
-    // DRV_EN_PORT &= ~DRV_EN_PIN;
-    UART_Printf("WARNING: Motor Driver ENABLED! (Duty 10%%)\r\n");
-    __delay_cycles(10000);
+    UART_Printf("Motor Enabled. Ramping up...\r\n");
+    __delay_cycles(24000); // 1ms
 
-    // 4. 6-Step Commutation Loop
+    // 3. 변수 초기화
     uint8_t step = 0;
+    uint32_t step_delay = 50000; // 초기 딜레이 (천천히 시작)
+    uint32_t min_delay = 2500;   // 최대 속도 제한
+    
+    // [신규] 가속 타이밍 조절 변수
+    uint8_t accel_counter = 0;
+
+    // 4. 무한 루프 (가속 구동)
     while (1) {
-        Check_Faults();
-        Commutate_Step(step); // 스텝 변경
-        
-        UART_Printf("Step: %d\r\n", step);
+        Check_Faults();       
+        Commutate_Step(step); 
         
         step++;
         if (step > 5) step = 0;
 
-        P1OUT ^= BIT0; // LED Toggle
-        
-        // 속도 조절: 0.5초마다 한 칸씩 이동 (눈으로 확인 가능)
-        __delay_cycles(500000); 
+        // 딜레이 (현재 속도 유지)
+        volatile uint32_t i;
+        for(i=0; i<step_delay; i++); 
+
+        // [수정 2] 가속 로직 개선 (Soft Start)
+        // 매 스텝마다 빨라지면 모터가 체합니다.
+        // "10번 걸을 때마다" 조금씩 빨라지도록 변경
+        accel_counter++;
+        if (accel_counter > 10) { 
+            accel_counter = 0;
+            
+            if (step_delay > min_delay) {
+                // 딜레이 감소폭을 100 -> 20으로 줄임 (아주 부드러운 가속)
+                step_delay -= 20; 
+            }
+        }
     }
+}
+
+
+// [신규 추가] PMM(Power Management Module) 전압 설정 함수
+void SetVCoreUp(uint8_t level) {
+    // 현재 레벨보다 높을 때만 실행
+    if ((PMMCTL0 & PMMCOREV_3) >= level) return; 
+
+    // PMM 레지스터 잠금 해제
+    PMMCTL0_H = PMMPW_H;
+
+    // 목표 레벨까지 한 단계씩 상승
+    while ((PMMCTL0 & PMMCOREV_3) < level) {
+        uint8_t next_level = (PMMCTL0 & PMMCOREV_3) + 1;
+        
+        // 1. High-side 전압 설정
+        SVSMHCTL = SVSHE + SVSHRVL0 * next_level + SVMHE + SVSMHRRL0 * next_level;
+        while ((PMMIFG & SVSMHDLYIFG) == 0); // High-side Delay 대기
+        PMMIFG &= ~(SVMHVLRIFG + SVSMHDLYIFG); // 플래그 클리어
+
+        // 2. Core 전압 설정 (실제 승압)
+        PMMCTL0_L = PMMCOREV0 * next_level;
+        // 전압 레벨 도달 대기
+        if ((PMMIFG & SVMLIFG)) while ((PMMIFG & SVMLVLRIFG) == 0);
+
+        // 3. Low-side 설정
+        SVSMLCTL = SVSLE + SVSLRVL0 * next_level + SVMLE + SVSMLRRL0 * next_level;
+        while ((PMMIFG & SVSMLDLYIFG) == 0); // Low-side Delay 대기 (표준 매크로 사용)
+        
+        // 플래그 클리어 (Level Reached + Delay)
+        PMMIFG &= ~(SVMLVLRIFG + SVSMLDLYIFG); 
+    }
+
+    // PMM 레지스터 잠금
+    PMMCTL0_H = 0x00;
+}
+
+// [수정됨] 24MHz 시스템 클럭 초기화 (VCORE 설정 포함)
+void SystemClock_Init(void) {
+    // 1. [핵심] 코어 전압을 Level 3 (최대 성능)으로 승압
+    // 24MHz를 쓰려면 반드시 Level 3이어야 함 (Datasheet 규격)
+    SetVCoreUp(1);
+    SetVCoreUp(2);
+    SetVCoreUp(3); 
+
+    // 2. FLL 초기화 (24MHz 설정)
+    UCSCTL3 = SELREF_2;                       // FLL Reference = REFO (32.768kHz 내부 소스)
+    UCSCTL4 |= SELA_2;                        // ACLK = REFO
+    
+    __bis_SR_register(SCG0);                  // FLL 루프 비활성화 (설정 시작)
+    UCSCTL0 = 0x0000;                         // DCOx, MODx 최저로 리셋
+    UCSCTL1 = DCORSEL_7;                      // DCO Range 설정 (High Frequency)
+    // 24MHz / 32768Hz = 732.42 -> 732
+    UCSCTL2 = FLLD_0 + 732;                   // Multiplier 설정 (N=732)
+    __bic_SR_register(SCG0);                  // FLL 루프 활성화
+
+    // 3. FLL 안정화 대기
+    // (전압이 충분하므로 이제 빨리 안정화됩니다)
+    __delay_cycles(250000); 
+
+    // 4. 오실레이터 폴트 플래그 클리어 (Loop)
+    // DCO가 목표 주파수에 도달할 때까지 에러 플래그를 계속 지워줌
+    do {
+        UCSCTL7 &= ~(XT2OFFG + XT1LFOFFG + DCOFFG);
+        SFRIFG1 &= ~OFIFG;
+    } while (SFRIFG1 & OFIFG);
+}
+
+// --- 타이머 초기화 (20kHz로 변경) ---
+void Timer_Init(void) {
+    // 핀 설정은 기존과 동일
+    P2DIR |= (BIT4 | BIT5); P2SEL |= (BIT4 | BIT5);
+    P1DIR |= (BIT4 | BIT5); P1SEL |= (BIT4 | BIT5);
+    P7DIR |= BIT4; P7SEL |= BIT4;
+    P3DIR |= BIT5; P3SEL |= BIT5;
+
+    // Timer A2 (Phase A)
+    TA2CCR0 = PWM_PERIOD - 1;       // 1200 counts (20kHz)
+    TA2CTL = TASSEL_2 + MC_1 + TACLR; // SMCLK(24MHz), Up Mode
+
+    // Timer A0 (Phase B)
+    TA0CCR0 = PWM_PERIOD - 1;
+    TA0CTL = TASSEL_2 + MC_1 + TACLR;
+
+    // Timer B0 (Phase C)
+    TB0CCR0 = PWM_PERIOD - 1;
+    TB0CTL = TBSSEL_2 + MC_1 + TBCLR;
+}
+
+// --- UART 속도 재설정 (24MHz 기준) ---
+void UART_Init(void) {
+    P4SEL |= BIT4 | BIT5;
+    UCA1CTL1 |= UCSWRST;
+    UCA1CTL1 |= UCSSEL_2; // SMCLK (24MHz)
+    // 24MHz / 115200 = 208.33
+    // UCBR = 208, UCBRS = 0, UCBRF = 0 (간단 설정)
+    UCA1BR0 = 208; 
+    UCA1BR1 = 0;
+    UCA1MCTL = UCBRS_3; // Modulation (오차 보정)
+    UCA1CTL1 &= ~UCSWRST;
+}
+
+// --- SPI 속도 재설정 (24MHz 기준) ---
+void SPI_Init(void) {
+    UCB0CTL1 |= UCSWRST;
+    UCB0CTL0 = UCMSB + UCMST + UCSYNC; // (UCCKPH 제거됨 유지)
+    UCB0CTL1 |= UCSSEL_2; 
+    // SMCLK(24MHz) / 24 = 1MHz SPI Clock
+    UCB0BR0 = 24; 
+    UCB0BR1 = 0;
+    UCB0CTL1 &= ~UCSWRST;
 }
 
 // --- 6-Step Commutation 함수 ---
@@ -79,38 +211,39 @@ void Commutate_Step(uint8_t step) {
 
     switch (step) {
         case 0: // Step 1: A+ B- (A High PWM, B Low ON)
-            TA2CCR2 = PWM_DUTY; TA2CCTL2 = OUTMOD_7; // A_H PWM
+            TA2CCR2 = PWM_DUTY_INIT; TA2CCTL2 = OUTMOD_7; // A_H PWM
             TA0CCTL3 = OUTMOD_0; TA0CCTL3 |= OUT;    // B_L ON
             break;
             
         case 1: // Step 2: A+ C-
-            TA2CCR2 = PWM_DUTY; TA2CCTL2 = OUTMOD_7; // A_H PWM
+            TA2CCR2 = PWM_DUTY_INIT; TA2CCTL2 = OUTMOD_7; // A_H PWM
             TB0CCTL5 = OUTMOD_0; TB0CCTL5 |= OUT;    // C_L ON
             break;
             
         case 2: // Step 3: B+ C-
-            TA0CCR4 = PWM_DUTY; TA0CCTL4 = OUTMOD_7; // B_H PWM
+            TA0CCR4 = PWM_DUTY_INIT; TA0CCTL4 = OUTMOD_7; // B_H PWM
             TB0CCTL5 = OUTMOD_0; TB0CCTL5 |= OUT;    // C_L ON
             break;
             
         case 3: // Step 4: B+ A-
-            TA0CCR4 = PWM_DUTY; TA0CCTL4 = OUTMOD_7; // B_H PWM
+            TA0CCR4 = PWM_DUTY_INIT; TA0CCTL4 = OUTMOD_7; // B_H PWM
             TA2CCTL1 = OUTMOD_0; TA2CCTL1 |= OUT;    // A_L ON
             break;
             
         case 4: // Step 5: C+ A-
-            TB0CCR2 = PWM_DUTY; TB0CCTL2 = OUTMOD_7; // C_H PWM
+            TB0CCR2 = PWM_DUTY_INIT; TB0CCTL2 = OUTMOD_7; // C_H PWM
             TA2CCTL1 = OUTMOD_0; TA2CCTL1 |= OUT;    // A_L ON
             break;
             
         case 5: // Step 6: C+ B-
-            TB0CCR2 = PWM_DUTY; TB0CCTL2 = OUTMOD_7; // C_H PWM
+            TB0CCR2 = PWM_DUTY_INIT; TB0CCTL2 = OUTMOD_7; // C_H PWM
             TA0CCTL3 = OUTMOD_0; TA0CCTL3 |= OUT;    // B_L ON
             break;
     }
 }
 
 // --- 타이머 초기화 (기본 설정만) ---
+/*
 void Timer_Init(void) {
     // 핀 설정 (Peripheral 모드)
     P2DIR |= (BIT4 | BIT5); P2SEL |= (BIT4 | BIT5); // A
@@ -130,7 +263,7 @@ void Timer_Init(void) {
     TB0CCR0 = PWM_PERIOD - 1;
     TB0CTL = TBSSEL_2 + MC_1 + TBCLR;
 }
-
+*/
 //============================================================================
 // --- 레지스터 초기화 함수 ---
 void DRV_Init_Registers(void) {
@@ -202,6 +335,7 @@ void BSP_Init(void) {
 /**
  * SPI 모듈 (USCI_B0) 초기화
  */
+ /*
 void SPI_Init(void) {
     // 1. SPI 모듈 리셋 (설정 변경 전 필수)
     UCB0CTL1 |= UCSWRST;
@@ -226,10 +360,12 @@ void SPI_Init(void) {
     // 5. 모듈 활성화
     UCB0CTL1 &= ~UCSWRST;
 }
+*/
 
 /**
  * UART 모듈 (USCI_A1) 초기화 (115200bps @ 8MHz)
  */
+ /*
 void UART_Init(void) {
     P4SEL |= BIT4 | BIT5;       // P4.4(TX), P4.5(RX)
     UCA1CTL1 |= UCSWRST;
@@ -243,6 +379,7 @@ void UART_Init(void) {
     
     UCA1CTL1 &= ~UCSWRST;
 }
+*/
 
 /**
  * UART printf 구현
