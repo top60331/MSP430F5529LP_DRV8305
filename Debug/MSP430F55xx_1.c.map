@@ -1,7 +1,7 @@
 ******************************************************************************
                   MSP430 Linker PC v21.6.1                     
 ******************************************************************************
->> Linked Thu Feb  5 10:24:29 2026
+>> Linked Thu Feb  5 10:40:47 2026
 
 OUTPUT FILE NAME:   <MSP430F55xx_1.c.out>
 ENTRY POINT SYMBOL: "_c_int00_noinit_noargs"  address: 00004400
@@ -20,7 +20,7 @@ MEMORY CONFIGURATION
   INFOA                 00001980   00000080  00000000  00000080  RWIX
   USBRAM                00001c00   00000800  00000000  00000800  RWIX
   RAM                   00002400   00002000  000000a0  00001f60  RWIX
-  FLASH                 00004400   0000bb80  00000147  0000ba39  RWIX
+  FLASH                 00004400   0000bb80  00000158  0000ba28  RWIX
   INT00                 0000ff80   00000002  00000000  00000002  RWIX
   INT01                 0000ff82   00000002  00000000  00000002  RWIX
   INT02                 0000ff84   00000002  00000000  00000002  RWIX
@@ -85,7 +85,7 @@ MEMORY CONFIGURATION
   INT61                 0000fffa   00000002  00000002  00000000  RWIX
   INT62                 0000fffc   00000002  00000002  00000000  RWIX
   RESET                 0000fffe   00000002  00000002  00000000  RWIX
-  FLASH2                00010000   000143f8  000007ee  00013c0a  RWIX
+  FLASH2                00010000   000143f8  00000646  00013db2  RWIX
 
 
 SECTION ALLOCATION MAP
@@ -109,10 +109,9 @@ section   page    origin      length       input sections
 .init_array 
 *          0    00004400    00000000     UNINITIALIZED
 
-.const     0    0000441c    0000012b     
-                  0000441c    000000f4     MSP430F55xx_1.obj (.const:.string)
-                  00004510    00000026     rts430x_lc_rd_eabi.lib : _printfi.c.obj (.const:.string)
-                  00004536    00000011     MSP430F55xx_1.obj (.const:.string:$P$T0$1)
+.const     0    0000441c    0000013c     
+                  0000441c    00000116     MSP430F55xx_1.obj (.const:.string)
+                  00004532    00000026     rts430x_lc_rd_eabi.lib : _printfi.c.obj (.const:.string)
 
 RTC        0    0000ffd2    00000002     
                   0000ffd2    00000002     rts430x_lc_rd_eabi.lib : int41.asm.obj (.int41)
@@ -191,40 +190,37 @@ SYSNMI     0    0000fffc    00000002
 .reset     0    0000fffe    00000002     
                   0000fffe    00000002     rts430x_lc_rd_eabi.lib : boot.c.obj (.reset)
 
-.text      0    00010000    000007ee     
+.text      0    00010000    00000646     
                   00010000    00000132     rts430x_lc_rd_eabi.lib : _printfi.c.obj (.text:__TI_printfi_minimal:_setfield___TI_printfi_minimal)
                   00010132    000000dc                            : _printfi.c.obj (.text:__TI_printfi_minimal:__TI_printfi_minimal)
                   0001020e    000000da                            : _printfi.c.obj (.text:__TI_printfi_minimal:_pproc_diouxp___TI_printfi_minimal)
-                  000102e8    000000d0     MSP430F55xx_1.obj (.text:main)
-                  000103b8    00000092     MSP430F55xx_1.obj (.text:UART_PrintHex16)
-                  0001044a    00000088     MSP430F55xx_1.obj (.text:DRV_Init_Registers)
-                  000104d2    0000006a     MSP430F55xx_1.obj (.text:DRV_ReadReg)
-                  0001053c    00000062     MSP430F55xx_1.obj (.text:DRV_WriteReg)
-                  0001059e    00000056     rts430x_lc_rd_eabi.lib : vsnprintf.c.obj (.text:vsnprintf)
-                  000105f4    0000004e     MSP430F55xx_1.obj (.text:BSP_Init)
-                  00010642    00000048     rts430x_lc_rd_eabi.lib : _printfi.c.obj (.text:__TI_printfi_minimal:_pproc_str___TI_printfi_minimal)
-                  0001068a    00000036     MSP430F55xx_1.obj (.text:UART_Printf)
-                  000106c0    00000036     rts430x_lc_rd_eabi.lib : vsnprintf.c.obj (.text:_outs)
-                  000106f6    00000026                            : memccpy.c.obj (.text:memccpy)
-                  0001071c    00000024     MSP430F55xx_1.obj (.text:UART_Init)
-                  00010740    00000020     rts430x_lc_rd_eabi.lib : vsnprintf.c.obj (.text:_outc)
-                  00010760    0000001e     MSP430F55xx_1.obj (.text:SPI_Init)
-                  0001077e    00000018     rts430x_lc_rd_eabi.lib : mult16_f5hw.asm.obj (.text)
-                  00010796    00000016                            : memset.c.obj (.text:memset)
-                  000107ac    00000016                            : div16u.asm.obj (.text)
-                  000107c2    00000014                            : memcpy.c.obj (.text:memcpy)
-                  000107d6    0000000e                            : strlen.c.obj (.text:strlen)
-                  000107e4    00000006                            : exit.c.obj (.text:abort)
-                  000107ea    00000004                            : pre_init.c.obj (.text:_system_pre_init)
+                  000102e8    000000a6     MSP430F55xx_1.obj (.text:PWM_Init)
+                  0001038e    00000068     MSP430F55xx_1.obj (.text:main)
+                  000103f6    00000056     rts430x_lc_rd_eabi.lib : vsnprintf.c.obj (.text:vsnprintf)
+                  0001044c    0000004e     MSP430F55xx_1.obj (.text:BSP_Init)
+                  0001049a    00000048     rts430x_lc_rd_eabi.lib : _printfi.c.obj (.text:__TI_printfi_minimal:_pproc_str___TI_printfi_minimal)
+                  000104e2    00000036     MSP430F55xx_1.obj (.text:UART_Printf)
+                  00010518    00000036     rts430x_lc_rd_eabi.lib : vsnprintf.c.obj (.text:_outs)
+                  0001054e    00000026                            : memccpy.c.obj (.text:memccpy)
+                  00010574    00000024     MSP430F55xx_1.obj (.text:UART_Init)
+                  00010598    00000020     rts430x_lc_rd_eabi.lib : vsnprintf.c.obj (.text:_outc)
+                  000105b8    0000001e     MSP430F55xx_1.obj (.text:SPI_Init)
+                  000105d6    00000018     rts430x_lc_rd_eabi.lib : mult16_f5hw.asm.obj (.text)
+                  000105ee    00000016                            : memset.c.obj (.text:memset)
+                  00010604    00000016                            : div16u.asm.obj (.text)
+                  0001061a    00000014                            : memcpy.c.obj (.text:memcpy)
+                  0001062e    0000000e                            : strlen.c.obj (.text:strlen)
+                  0001063c    00000006                            : exit.c.obj (.text:abort)
+                  00010642    00000004                            : pre_init.c.obj (.text:_system_pre_init)
 
 MODULE SUMMARY
 
        Module                code   ro data   rw data
        ------                ----   -------   -------
     .\
-       MSP430F55xx_1.obj     892    261       0      
+       MSP430F55xx_1.obj     468    278       0      
     +--+---------------------+------+---------+---------+
-       Total:                892    261       0      
+       Total:                468    278       0      
                                                      
     D:\ti\ccs2030\ccs\tools\compiler\ti-cgt-msp430_21.6.1.LTS\lib\rts430x_lc_rd_eabi.lib
        _printfi.c.obj        816    38        0      
@@ -266,7 +262,7 @@ MODULE SUMMARY
                                                      
        Stack:                0      0         160    
     +--+---------------------+------+---------+---------+
-       Grand Total:          2058   345       160    
+       Grand Total:          1634   362       160    
 
 
 GLOBAL SYMBOLS: SORTED ALPHABETICALLY BY Name 
@@ -355,8 +351,8 @@ address   name
 00000732  ADC12MEM9             
 00000733  ADC12MEM9_H           
 00000732  ADC12MEM9_L           
-000105f4  BSP_Init              
-000107e4  C$$EXIT               
+0001044c  BSP_Init              
+0001063c  C$$EXIT               
 000008c0  CBCTL0                
 000008c1  CBCTL0_H              
 000008c0  CBCTL0_L              
@@ -415,9 +411,6 @@ address   name
 00000506  DMACTL3               
 00000508  DMACTL4               
 0000050e  DMAIV                 
-0001044a  DRV_Init_Registers    
-000104d2  DRV_ReadReg           
-0001053c  DRV_WriteReg          
 00000140  FCTL1                 
 00000141  FCTL1_H               
 00000140  FCTL1_L               
@@ -606,6 +599,7 @@ address   name
 0000012e  PMMRIE                
 0000012f  PMMRIE_H              
 0000012e  PMMRIE_L              
+000102e8  PWM_Init              
 00000158  RCCTL0                
 00000159  RCCTL0_H              
 00000158  RCCTL0_L              
@@ -673,7 +667,7 @@ address   name
 00000104  SFRRPCR               
 00000105  SFRRPCR_H             
 00000104  SFRRPCR_L             
-00010760  SPI_Init              
+000105b8  SPI_Init              
 000004ce  SUMEXT                
 000004cf  SUMEXT_H              
 000004ce  SUMEXT_L              
@@ -771,9 +765,8 @@ address   name
 000003e0  TB0EX0                
 000003ee  TB0IV                 
 000003d0  TB0R                  
-0001071c  UART_Init             
-000103b8  UART_PrintHex16       
-0001068a  UART_Printf           
+00010574  UART_Init             
+000104e2  UART_Printf           
 000005d0  UCA0ABCTL             
 000005c6  UCA0BRW               
 000005c7  UCA0BRW_H             
@@ -1045,20 +1038,20 @@ ffffffff  __TI_pprof_out_hndl
 ffffffff  __TI_prof_data_size   
 ffffffff  __TI_prof_data_start  
 ffffffff  __c_args__            
-000107ac  __mspabi_divu         
-0001077e  __mspabi_mpyi_f5hw    
-000107ac  __mspabi_remu         
+00010604  __mspabi_divu         
+000105d6  __mspabi_mpyi_f5hw    
+00010604  __mspabi_remu         
 00004400  _c_int00_noinit_noargs
 0000fffe  _reset_vector         
 00004360  _stack                
-000107ea  _system_pre_init      
-000107e4  abort                 
-000102e8  main                  
-000106f6  memccpy               
-000107c2  memcpy                
-00010796  memset                
-000107d6  strlen                
-0001059e  vsnprintf             
+00010642  _system_pre_init      
+0001063c  abort                 
+0001038e  main                  
+0001054e  memccpy               
+0001061a  memcpy                
+000105ee  memset                
+0001062e  strlen                
+000103f6  vsnprintf             
 
 
 GLOBAL SYMBOLS: SORTED BY Symbol Address 
@@ -1827,29 +1820,26 @@ address   name
 0000fffc  __TI_int62            
 0000fffe  _reset_vector         
 00010132  __TI_printfi_minimal  
-000102e8  main                  
-000103b8  UART_PrintHex16       
-0001044a  DRV_Init_Registers    
-000104d2  DRV_ReadReg           
-0001053c  DRV_WriteReg          
-0001059e  vsnprintf             
-000105f4  BSP_Init              
-0001068a  UART_Printf           
-000106f6  memccpy               
-0001071c  UART_Init             
-00010760  SPI_Init              
-0001077e  __mspabi_mpyi_f5hw    
-00010796  memset                
-000107ac  __mspabi_divu         
-000107ac  __mspabi_remu         
-000107c2  memcpy                
-000107d6  strlen                
-000107e4  C$$EXIT               
-000107e4  abort                 
-000107ea  _system_pre_init      
+000102e8  PWM_Init              
+0001038e  main                  
+000103f6  vsnprintf             
+0001044c  BSP_Init              
+000104e2  UART_Printf           
+0001054e  memccpy               
+00010574  UART_Init             
+000105b8  SPI_Init              
+000105d6  __mspabi_mpyi_f5hw    
+000105ee  memset                
+00010604  __mspabi_divu         
+00010604  __mspabi_remu         
+0001061a  memcpy                
+0001062e  strlen                
+0001063c  C$$EXIT               
+0001063c  abort                 
+00010642  _system_pre_init      
 ffffffff  __TI_pprof_out_hndl   
 ffffffff  __TI_prof_data_size   
 ffffffff  __TI_prof_data_start  
 ffffffff  __c_args__            
 
-[786 symbols]
+[783 symbols]

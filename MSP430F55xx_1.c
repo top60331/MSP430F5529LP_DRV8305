@@ -22,35 +22,51 @@ int main(void) {
     SPI_Init();     // SPI 초기화 (CPHA 수정됨)
     UART_Init();    // UART 초기화
 
-    __delay_cycles(1000000); // 전원 안정화 대기
-    UART_Printf("\r\n=== System Booting... ===\r\n");
+    UART_Printf("\r\n=== Step 3: PWM Signal Verify ===\r\n");
 
-    // 1. DRV8305 깨우기 (WAKE)
-    DRV_WAKE_PORT |= DRV_WAKE_PIN;
-    __delay_cycles(100000); 
+    // [안전 장치] DRV8305 비활성화! (모터 구동 방지)
+    // EN_GATE를 Low로 두면 DRV8305는 PWM 입력을 무시합니다.
+    DRV_EN_PORT &= ~DRV_EN_PIN; 
+    UART_Printf("Safety: DRV8305 Disabled (EN_GATE = LOW)\r\n");
+
+    // PWM 발생 시작
+    PWM_Init();
+    UART_Printf("PWM Generator: ON (1kHz, 50% Duty)\r\n");
+    UART_Printf("Action: Please probe MCU pins with Oscilloscope.\r\n");
+
+    // __delay_cycles(1000000); // 전원 안정화 대기
+    // UART_Printf("\r\n=== System Booting... ===\r\n");
+
+    // // 1. DRV8305 깨우기 (WAKE)
+    // DRV_WAKE_PORT |= DRV_WAKE_PIN;
+    // __delay_cycles(100000); 
     
-    // 2. EN_GATE 활성화 (설정을 위해 Enable 필요)
-    DRV_EN_PORT |= DRV_EN_PIN;
-    __delay_cycles(10000); 
+    // // 2. EN_GATE 활성화 (설정을 위해 Enable 필요)
+    // DRV_EN_PORT |= DRV_EN_PIN;
+    // __delay_cycles(10000); 
 
-    UART_Printf("[DRV8305] Waking up & Enable...\r\n");
+    // UART_Printf("[DRV8305] Waking up & Enable...\r\n");
 
-    // 3. [핵심] 레지스터 설정 및 검증
-    DRV_Init_Registers();
+    // // 3. [핵심] 레지스터 설정 및 검증
+    // DRV_Init_Registers();
 
-    UART_Printf("[System] Ready. Monitoring Status...\r\n");
+    // UART_Printf("[System] Ready. Monitoring Status...\r\n");
 
     // 4. 상태 모니터링
     while (1) {
-        uint16_t status = DRV_ReadReg(0x01); // Status
-        uint16_t vds = DRV_ReadReg(0x02);    // VDS Faults
+        // uint16_t status = DRV_ReadReg(0x01); // Status
+        // uint16_t vds = DRV_ReadReg(0x02);    // VDS Faults
         
-        UART_Printf("Stat(0x01): "); UART_PrintHex16(status);
-        UART_Printf(" | VDS(0x02): "); UART_PrintHex16(vds);
-        UART_Printf("\r\n");
+        // UART_Printf("Stat(0x01): "); UART_PrintHex16(status);
+        // UART_Printf(" | VDS(0x02): "); UART_PrintHex16(vds);
+        // UART_Printf("\r\n");
         
-        P1OUT ^= BIT0; // LED 깜빡임
-        __delay_cycles(8000000); // 1초 대기
+        // P1OUT ^= BIT0; // LED 깜빡임
+        // __delay_cycles(8000000); // 1초 대기
+        
+        // LED만 깜빡이며 살아있음을 표시
+        P1OUT ^= BIT0;
+        __delay_cycles(500000);
     }
 }
 
