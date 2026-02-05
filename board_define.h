@@ -10,6 +10,32 @@
 
 #include <msp430.h>
 
+
+// --- 하드웨어 핀 정의 (사용자 정보 반영) ---
+// Encoder A: P1.6 (Interrupt OK)
+#define ENC_A_DIR   P1DIR
+#define ENC_A_IN    P1IN
+#define ENC_A_REN   P1REN
+#define ENC_A_OUT   P1OUT
+#define ENC_A_IE    P1IE
+#define ENC_A_IES   P1IES
+#define ENC_A_IFG   P1IFG
+#define ENC_A_PIN   BIT6
+
+// Encoder B: P6.6 (No Interrupt -> Polling in ISR)
+#define ENC_B_DIR   P6DIR
+#define ENC_B_IN    P6IN
+#define ENC_B_REN   P6REN
+#define ENC_B_OUT   P6OUT
+#define ENC_B_PIN   BIT6
+
+// Encoder I (Index): P2.7
+#define ENC_I_DIR   P2DIR
+#define ENC_I_IN    P2IN
+#define ENC_I_REN   P2REN
+#define ENC_I_OUT   P2OUT
+#define ENC_I_PIN   BIT7
+
 // ============================================================================
 // [1] Communication Pins (SPI & UART)
 // ============================================================================
