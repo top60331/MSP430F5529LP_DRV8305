@@ -1,75 +1,88 @@
 #include <msp430.h>
-#include <stdint.h>     // uint8_t, uint16_t 사용
-#include <stdio.h>      // vsnprintf 사용
-#include <stdarg.h>     // va_list 사용
-#include "board_define.h" 
+#include <stdint.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include "board_define.h"
 
-// ============================================================================
-// [함수 선언부 (Prototypes)]
-// ============================================================================
+// --- 함수 선언 ---
 void BSP_Init(void);
 void SPI_Init(void);
 void UART_Init(void);
 void UART_Printf(char *format, ...);
+void UART_PrintHex16(uint16_t value);
 
 uint16_t DRV_ReadReg(uint8_t addr);
 void DRV_WriteReg(uint8_t addr, uint16_t data);
-void UART_PrintHex16(uint16_t value);
-void Test_Connection_GPIO(void);
-void GPIO_Alive_Test(void);
+void DRV_Init_Registers(void);
+void PWM_Init(void);
 
-// ============================================================================
-// [메인 함수 (Main)]
-// ============================================================================
+// --- 메인 함수 ---
 int main(void) {
-    BSP_Init();     // 하드웨어 핀 설정
-    SPI_Init();     // SPI 모듈 설정
-    UART_Init();    // UART 모듈 설정
+    BSP_Init();     // 하드웨어 초기화
+    SPI_Init();     // SPI 초기화 (CPHA 수정됨)
+    UART_Init();    // UART 초기화
 
-    // 전원 안정화 대기
-    __delay_cycles(1000000); 
+    __delay_cycles(1000000); // 전원 안정화 대기
     UART_Printf("\r\n=== System Booting... ===\r\n");
 
-    // 1. DRV8305 깨우기 (Wake Up Sequence)
-    // WAKE 핀 High -> 1ms 이상 대기
+    // 1. DRV8305 깨우기 (WAKE)
     DRV_WAKE_PORT |= DRV_WAKE_PIN;
-    __delay_cycles(80000); // 약 10ms 대기 (8MHz 기준)
+    __delay_cycles(100000); 
     
-    // EN_GATE 활성화
+    // 2. EN_GATE 활성화 (설정을 위해 Enable 필요)
     DRV_EN_PORT |= DRV_EN_PIN;
-    __delay_cycles(8000); 
+    __delay_cycles(10000); 
 
-    UART_Printf("[DRV8305] Waking up...\r\n");
+    UART_Printf("[DRV8305] Waking up & Enable...\r\n");
 
-    // 2. 무한 루프: 상태 확인
+    // 3. [핵심] 레지스터 설정 및 검증
+    DRV_Init_Registers();
+
+    UART_Printf("[System] Ready. Monitoring Status...\r\n");
+
+    // 4. 상태 모니터링
     while (1) {
-        // Status Register 0x01 읽기 (Warning Register)
-        uint16_t status = DRV_ReadReg(0x01);
+        uint16_t status = DRV_ReadReg(0x01); // Status
+        uint16_t vds = DRV_ReadReg(0x02);    // VDS Faults
         
-        UART_Printf("Reg 0x01: ");
-        UART_PrintHex16(status);  // 전용 함수로 출력 (무조건 0x0000 형식으로 나옴)
+        UART_Printf("Stat(0x01): "); UART_PrintHex16(status);
+        UART_Printf(" | VDS(0x02): "); UART_PrintHex16(vds);
         UART_Printf("\r\n");
         
-        // Test_Connection_GPIO();
-        // GPIO_Alive_Test();
-
-        // UART_Printf("Status Reg(0x05): 0x%04X\r\n", status);
-
-        // if (status == 0xFFFF) {
-        //     UART_Printf(" -> Error: SPI MISO stuck High (Check Power/Connection).\r\n");
-        // } else if (status == 0x0000) {
-        //     UART_Printf(" -> Success: Communication OK. System Normal.\r\n");
-        // } else {
-        //     UART_Printf(" -> Warning: Fault detected or Value Read.\r\n");
-        // }
-        
-        // P1.0 LED 토글 (동작 확인용)
-        P1OUT ^= BIT0; 
-        
-        // 1초 대기
-        __delay_cycles(8000000); 
+        P1OUT ^= BIT0; // LED 깜빡임
+        __delay_cycles(8000000); // 1초 대기
     }
 }
+
+// --- 레지스터 초기화 함수 ---
+void DRV_Init_Registers(void) {
+    UART_Printf(">>> Configuring Registers...\r\n");
+
+    // 1. Gate Drive Strength: 40mA/50mA (Soft)
+    DRV_WriteReg(0x05, 0x0333); 
+    DRV_WriteReg(0x06, 0x0333);
+
+    // 2. PWM Mode: 6-PWM, Deadtime: 1760ns (Safety)
+    // Value: 0x0056
+    DRV_WriteReg(0x07, 0x0056);
+
+    // 3. VDS Protection: 0.403V, Latched Shutdown
+    // Value: 0x0080
+    DRV_WriteReg(0x0C, 0x0080);
+
+    // 4. 검증 (0x07번지 확인)
+    uint16_t check07 = DRV_ReadReg(0x07);
+    UART_Printf("Check Reg 0x07: "); UART_PrintHex16(check07);
+    
+    if ((check07 & 0x00FF) == 0x0056) {
+        UART_Printf(" -> OK (Config Success)\r\n");
+    } else {
+        UART_Printf(" -> FAIL! Check SPI Write.\r\n");
+    }
+}
+
+// ... (나머지 BSP_Init, SPI_Init, UART 함수들은 이전과 동일) ...
+// (특히 SPI_Init에서 UCCKPH 비트 제거된 것 유지해주세요!)
 
 // ============================================================================
 // [함수 구현부 (Definitions)]
@@ -245,51 +258,46 @@ void UART_PrintHex16(uint16_t value) {
     while (!(UCA1IFG & UCTXIFG)); UCA1TXBUF = hexTable[value & 0xF];
 }
 
-// [하드웨어 연결 테스트용 코드]
-// SPI를 쓰지 않고, 핀을 1초마다 High/Low로 바꿉니다.
-// 멀티미터나 오실로스코프로 '도착지점(DRV8305 핀)'을 찍어보세요.
-
-void Test_Connection_GPIO(void) {
-    // 1. 핀을 GPIO 출력으로 설정
-    P3DIR |= BIT0; // SDI (P3.0) -> Output
-    P3DIR |= BIT2; // SCLK (P3.2) -> Output (여기가 J2.3까지 가는지 확인!)
-    P2DIR |= BIT6; // SCS (P2.6) -> Output (여기가 J2.8까지 가는지 확인!)
-
-    UART_Printf("=== GPIO Toggle Test Mode ===\r\n");
-
-    while(1) {
-        // High 상태
-        P3OUT |= BIT0; // SDI = 3.3V
-        P3OUT |= BIT2; // SCLK = 3.3V
-        P2OUT |= BIT6; // SCS = 3.3V
-        UART_Printf("ALL PINS HIGH (Check 3.3V)\r\n");
-        __delay_cycles(4000000); // 0.5초 대기
-
-        // Low 상태
-        P3OUT &= ~BIT0; // SDI = 0V
-        P3OUT &= ~BIT2; // SCLK = 0V
-        P2OUT &= ~BIT6; // SCS = 0V
-        UART_Printf("ALL PINS LOW (Check 0V)\r\n");
-        __delay_cycles(4000000); // 0.5초 대기
-    }
-}
-
-void GPIO_Alive_Test(void) {
-    WDTCTL = WDTPW | WDTHOLD; // 와치독 정지
-
-    // 1. SPI/Peripheral 기능 모두 해제 (순수 GPIO 모드)
-    P3SEL &= ~(BIT0 | BIT1 | BIT2); 
+// --- PWM 초기화 함수 (20kHz 생성) ---
+void PWM_Init(void) {
+    // 1. MCU 클럭 설정 (PWM 해상도를 위해 8MHz 이상 권장하지만, 일단 기본 1MHz로 테스트)
+    // SMCLK = 1MHz 가정 -> Period = 50 (20kHz)
+    // 좀 더 부드러운 테스트를 위해 주기를 길게 잡겠습니다. (Period = 1000 -> 1kHz)
+    // 오실로스코프로 보기 편하게 1kHz로 설정합니다.
     
-    // 2. 방향을 출력으로 설정
-    P3DIR |= (BIT0 | BIT2); // P3.0(SIMO 위치), P3.2(SCLK 위치)
+    uint16_t pwm_period = 1000 - 1; 
 
-    while(1) {
-        // High
-        P3OUT |= (BIT0 | BIT2);
-        __delay_cycles(400000); // 딜레이
-        
-        // Low
-        P3OUT &= ~(BIT0 | BIT2);
-        __delay_cycles(400000); // 딜레이
-    }
+    // --- Phase A (Timer_A2): P2.4(Low), P2.5(High) ---
+    P2DIR |= (BIT4 | BIT5);
+    P2SEL |= (BIT4 | BIT5); // P2.4, P2.5를 타이머 출력으로 연결
+    
+    TA2CCR0 = pwm_period;           // 주기 설정
+    TA2CCTL1 = OUTMOD_7;            // Reset/Set 모드 (PWM)
+    TA2CCR1 = pwm_period / 2;       // Duty 50% (P2.4)
+    TA2CCTL2 = OUTMOD_7;
+    TA2CCR2 = pwm_period / 2;       // Duty 50% (P2.5)
+    TA2CTL = TASSEL_2 + MC_1 + TACLR; // SMCLK, Up Mode
+
+    // --- Phase B (Timer_A0): P1.4(Low), P1.5(High) ---
+    P1DIR |= (BIT4 | BIT5);
+    P1SEL |= (BIT4 | BIT5);
+    
+    TA0CCR0 = pwm_period;
+    TA0CCTL3 = OUTMOD_7;            // TA0.3 -> P1.4
+    TA0CCR3 = pwm_period / 2;
+    TA0CCTL4 = OUTMOD_7;            // TA0.4 -> P1.5
+    TA0CCR4 = pwm_period / 2;
+    TA0CTL = TASSEL_2 + MC_1 + TACLR;
+
+    // --- Phase C (Timer_B0): P3.5(Low), P7.4(High) ---
+    // 주의: P7.4는 TB0.2, P3.5는 TB0.5에 해당
+    P7DIR |= BIT4; P7SEL |= BIT4;   // P7.4
+    P3DIR |= BIT5; P3SEL |= BIT5;   // P3.5
+    
+    TB0CCR0 = pwm_period;
+    TB0CCTL2 = OUTMOD_7;            // TB0.2 -> P7.4 (High)
+    TB0CCR2 = pwm_period / 2;
+    TB0CCTL5 = OUTMOD_7;            // TB0.5 -> P3.5 (Low)
+    TB0CCR5 = pwm_period / 2;
+    TB0CTL = TBSSEL_2 + MC_1 + TBCLR;
 }
