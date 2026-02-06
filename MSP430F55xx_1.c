@@ -1,124 +1,128 @@
 #include <msp430.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdarg.h>
-
-// --- 핀 정의 ---
-#define ENC_A_PIN   BIT6 // P1.6
-#define ENC_B_PIN   BIT6 // P6.6
-#define ENC_I_PIN   BIT7 // P2.7 (Index)
-
-// --- 전역 변수 ---
-volatile int32_t g_encoder_count = 0;
-volatile int32_t g_captured_count = 0;
-volatile uint8_t g_result_ready = 0;
+#include "board_define.h"
 
 // --- 함수 선언 ---
 void SystemClock_Init(void);
 void SetVCoreUp(uint8_t level);
 void UART_Init_115200(void);
-void UART_PrintInt32(int32_t n);
 void UART_PrintString(char *str);
-void Encoder_Init(void);
+void UART_PrintHex16(uint16_t n);
+void SPI_Config_Mode(int mode);
+uint16_t DRV_ReadReg(uint8_t addr);
 
-// --- 메인 함수 ---
+// =============================================================
+// 메인 함수
+// =============================================================
 int main(void) {
     WDTCTL = WDTPW | WDTHOLD;
 
-    // 1. 클럭 24MHz 설정 (115200bps를 위해 필수)
-    SystemClock_Init(); 
+    // 1. 시스템 초기화
+    SystemClock_Init();   // 24MHz
+    UART_Init_115200();   
     
-    // 2. UART 115200bps 설정
-    UART_Init_115200();
+    // SPI 핀 (P3.0, P3.1, P3.2)
+    P3SEL |= BIT0 | BIT1 | BIT2; 
+    P3DIR |= BIT0 | BIT2; // MOSI, CLK -> Out
+    P3DIR &= ~BIT1;       // MISO -> In
     
-    // 3. 엔코더 & 인덱스 핀 설정
-    Encoder_Init();
+    // [수정 완료] CS 핀 설정: P2.6 -> P2.0
+    P2DIR |= BIT0; P2OUT |= BIT0; // CS High (Inactive)
 
-    __enable_interrupt(); // 인터럽트 활성화
+    __enable_interrupt(); 
 
-    UART_PrintString("\r\n=== Encoder Resolution Test (Index Based) ===\r\n");
-    UART_PrintString("Speed: 115200 bps\r\n");
-    UART_PrintString("Action: Rotate motor multiple times.\r\n");
-    UART_PrintString("Waiting for Index signal...\r\n");
+    UART_PrintString("\r\n\r\n=== SPI Doctor: Pin Corrected (P2.0) ===\r\n");
+    UART_PrintString("Target: DRV8305 Register 0x07\r\n");
+    
+    // 2. DRV8305 깨우기
+    UART_PrintString("1. Waking up DRV8305... ");
+    DRV_WAKE_PORT |= DRV_WAKE_PIN; 
+    __delay_cycles(2400000); 
+    DRV_EN_PORT |= DRV_EN_PIN;     
+    __delay_cycles(240000); 
+    UART_PrintString("Done.\r\n");
 
+    // 3. 모드 스캔 루프
+    int mode = 0;
     while (1) {
-        // 인덱스 인터럽트에서 한 바퀴 측정이 끝나면 플래그를 세움
-        if (g_result_ready) {
-            UART_PrintString("One Rev Count: ");
-            UART_PrintInt32(g_captured_count);
-            UART_PrintString("\r\n");
-            
-            g_result_ready = 0; // 플래그 클리어
+        UART_PrintString("\r\nTesting Mode ");
+        // 숫자 출력 (간단히)
+        while(!(UCA1IFG & UCTXIFG)); UCA1TXBUF = mode + '0';
+        UART_PrintString("... ");
+
+        // SPI 설정 변경
+        SPI_Config_Mode(mode);
+
+        // 테스트 읽기
+        uint16_t val = DRV_ReadReg(0x07); 
+
+        // 결과 출력
+        UART_PrintString("Read: ");
+        UART_PrintHex16(val);
+
+        // 성공 판독 (0이 아니면 성공!)
+        if (val != 0x0000 && val != 0xFFFF) {
+            UART_PrintString("  <-- [JACKPOT] Communication Success!");
         }
+
+        mode++;
+        if (mode > 3) mode = 0;
+
+        __delay_cycles(24000000); // 1초 대기
     }
 }
 
-// --- 엔코더 및 인덱스 초기화 ---
-void Encoder_Init(void) {
-    // 1. A상 (P1.6) - 인터럽트 사용
-    P1DIR &= ~ENC_A_PIN; P1REN |= ENC_A_PIN; P1OUT |= ENC_A_PIN;
-    P1IES &= ~ENC_A_PIN; P1IFG &= ~ENC_A_PIN; P1IE |= ENC_A_PIN;
+// =============================================================
+// SPI 설정 (모드 스캔용)
+// =============================================================
+void SPI_Config_Mode(int mode) {
+    UCB0CTL1 |= UCSWRST; 
+    uint8_t ctl0 = UCMST + UCSYNC + UCMSB;
 
-    // 2. B상 (P6.6) - 입력만
-    P6DIR &= ~ENC_B_PIN; P6REN |= ENC_B_PIN; P6OUT |= ENC_B_PIN;
-
-    // 3. Index상 (P2.7) - 인터럽트 사용!
-    P2DIR &= ~ENC_I_PIN; P2REN |= ENC_I_PIN; P2OUT |= ENC_I_PIN;
+    switch (mode) {
+        case 0: ctl0 |= UCCKPH; break;          // CKPL=0, CKPH=1
+        case 1: break;                          // CKPL=0, CKPH=0
+        case 2: ctl0 |= UCCKPL + UCCKPH; break; // CKPL=1, CKPH=1
+        case 3: ctl0 |= UCCKPL; break;          // CKPL=1, CKPH=0
+    }
     
-    // Index 신호가 Low Active인지 High Active인지에 따라 설정 (보통 Falling Edge 권장)
-    P2IES |= ENC_I_PIN;  // Falling Edge 감지 (High -> Low)
-    P2IFG &= ~ENC_I_PIN;
-    P2IE  |= ENC_I_PIN;  // 인터럽트 활성화
+    UCB0CTL0 = ctl0;
+    UCB0CTL1 |= UCSSEL_2; 
+    UCB0BR0 = 48; // 500kHz (안전)
+    UCB0BR1 = 0;
+    UCB0CTL1 &= ~UCSWRST; 
+    __delay_cycles(2400); 
 }
 
-// --- P1 인터럽트 (카운팅) ---
-#pragma vector=PORT1_VECTOR
-__interrupt void Port_1(void) {
-    if (P1IFG & ENC_A_PIN) {
-        // A상, B상 읽기
-        uint8_t B_val = (P6IN & ENC_B_PIN) ? 1 : 0;
-        
-        if (P1IES & ENC_A_PIN) { // Rising Edge
-            if (B_val == 0) g_encoder_count++;
-            else            g_encoder_count--;
-            P1IES |= ENC_A_PIN; // 다음 Edge 설정 (Rising 유지? A상 로직 확인)
-            // *주의*: 지난번 로직 유지 (Rising/Falling 모두 잡아서 2체배)
-            // 만약 4체배를 원하면 A, B 모두 인터럽트 걸어야 함.
-            // P1.6만으로는 최대 2체배(2048)가 한계입니다.
-            // 일단 'Rising'만 잡아서 1체배(1024)인지 확인하는 게 가장 깔끔할 수도 있습니다.
-            // 여기서는 Rising/Falling 모두 잡는 로직 적용 (예상값: 2048)
-        } else { // Falling Edge
-            if (B_val == 1) g_encoder_count++;
-            else            g_encoder_count--;
-            P1IES &= ~ENC_A_PIN; 
-        }
-        P1IFG &= ~ENC_A_PIN;
-    }
+// =============================================================
+// SPI Read (CS핀 P2.0으로 수정됨)
+// =============================================================
+uint16_t DRV_ReadReg(uint8_t addr) {
+    uint16_t cmd = (1 << 15) | ((addr & 0x0F) << 11);
+    uint16_t res = 0;
+    
+    // [수정] CS Low (P2.0)
+    P2OUT &= ~BIT0; 
+    __delay_cycles(100); 
+
+    while(!(UCB0IFG & UCTXIFG)); UCB0TXBUF = (cmd >> 8) & 0xFF;
+    while(!(UCB0IFG & UCRXIFG)); res = UCB0RXBUF << 8;
+
+    while(!(UCB0IFG & UCTXIFG)); UCB0TXBUF = 0x00;
+    while(!(UCB0IFG & UCRXIFG)); res |= UCB0RXBUF;
+
+    // [수정] CS High (P2.0)
+    __delay_cycles(50); 
+    P2OUT |= BIT0; 
+    
+    return res & 0x07FF; 
 }
 
-// --- P2 인터럽트 (Index 감지 및 리셋) ---
-#pragma vector=PORT2_VECTOR
-__interrupt void Port_2(void) {
-    if (P2IFG & ENC_I_PIN) {
-        // 1. 현재까지의 카운트 캡처
-        g_captured_count = g_encoder_count;
-        
-        // 2. 카운터 리셋
-        g_encoder_count = 0;
-        
-        // 3. 메인 루프에 알림
-        // (단, 0인 경우는 처음 켜자마자 Index 건드린 경우일 수 있으니 제외 가능)
-        if (g_captured_count != 0) {
-            g_result_ready = 1; 
-        }
-
-        P2IFG &= ~ENC_I_PIN; // 플래그 클리어
-    }
-}
-
-// --- UART & System Clock (24MHz / 115200bps) ---
+// =============================================================
+// 기타 필수 함수 (기존 유지)
+// =============================================================
 void SetVCoreUp(uint8_t level) { 
-    // (이전과 동일한 PMM 승압 코드)
     if ((PMMCTL0 & PMMCOREV_3) >= level) return; 
     PMMCTL0_H = PMMPW_H;
     while ((PMMCTL0 & PMMCOREV_3) < level) {
@@ -132,38 +136,26 @@ void SetVCoreUp(uint8_t level) {
     }
     PMMCTL0_H = 0x00;
 }
-
 void SystemClock_Init(void) {
     SetVCoreUp(1); SetVCoreUp(2); SetVCoreUp(3);
     UCSCTL3 = SELREF_2; UCSCTL4 |= SELA_2;
     __bis_SR_register(SCG0);
-    UCSCTL0 = 0x0000; UCSCTL1 = DCORSEL_7; UCSCTL2 = FLLD_0 + 732; // 24MHz
+    UCSCTL0 = 0x0000; UCSCTL1 = DCORSEL_7; UCSCTL2 = FLLD_0 + 732; 
     __bic_SR_register(SCG0);
     __delay_cycles(250000);
-    do {
-        UCSCTL7 &= ~(XT2OFFG + XT1LFOFFG + DCOFFG);
-        SFRIFG1 &= ~OFIFG;
-    } while (SFRIFG1 & OFIFG);
+    do { UCSCTL7 &= ~(XT2OFFG + XT1LFOFFG + DCOFFG); SFRIFG1 &= ~OFIFG; } while (SFRIFG1 & OFIFG);
 }
-
 void UART_Init_115200(void) {
-    P4SEL |= BIT4 | BIT5;
-    UCA1CTL1 |= UCSWRST;
-    UCA1CTL1 |= UCSSEL_2; // SMCLK 24MHz
-    // 24,000,000 / 115200 = 208.333
-    UCA1BR0 = 208; UCA1BR1 = 0;
-    UCA1MCTL = UCBRS_3; // Modulation
-    UCA1CTL1 &= ~UCSWRST;
+    P4SEL |= BIT4|BIT5; UCA1CTL1 |= UCSWRST; UCA1CTL1 |= UCSSEL_2; 
+    UCA1BR0 = 208; UCA1BR1 = 0; UCA1MCTL = UCBRS_3; UCA1CTL1 &= ~UCSWRST;
 }
+void UART_PrintString(char *str) { while(*str) { while (!(UCA1IFG & UCTXIFG)); UCA1TXBUF = *str++; } }
 
-void UART_PrintString(char *str) {
-    while(*str) { while (!(UCA1IFG & UCTXIFG)); UCA1TXBUF = *str++; }
-}
-
-void UART_PrintInt32(int32_t n) {
-    if (n < 0) { UART_PrintString("-"); n = -n; }
-    char buf[12]; int i=0;
-    if (n==0) { UART_PrintString("0"); return; }
-    while(n>0) { buf[i++] = (n%10)+'0'; n/=10; }
-    while(i>0) { while (!(UCA1IFG & UCTXIFG)); UCA1TXBUF = buf[--i]; }
+void UART_PrintHex16(uint16_t n) {
+    char hex[] = "0123456789ABCDEF";
+    char buf[4];
+    int i; 
+    UART_PrintString("0x");
+    for(i=3; i>=0; i--) { buf[i] = hex[n & 0xF]; n >>= 4; }
+    for(i=0; i<4; i++) { while (!(UCA1IFG & UCTXIFG)); UCA1TXBUF = buf[i]; }
 }

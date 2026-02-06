@@ -18,6 +18,7 @@ MSP430F55xx_1.obj: D:/ti/ccs2030/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/inc
 MSP430F55xx_1.obj: D:/ti/ccs2030/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/sys/_stdint.h
 MSP430F55xx_1.obj: D:/ti/ccs2030/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdio.h
 MSP430F55xx_1.obj: D:/ti/ccs2030/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdarg.h
+MSP430F55xx_1.obj: ../board_define.h
 
 ../MSP430F55xx_1.c:
 
@@ -54,4 +55,6 @@ D:/ti/ccs2030/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/sys/_stdint.h:
 D:/ti/ccs2030/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdio.h:
 
 D:/ti/ccs2030/ccs/tools/compiler/ti-cgt-msp430_21.6.1.LTS/include/stdarg.h:
+
+../board_define.h:
 
